@@ -7,7 +7,7 @@ Keep your styles and scripts colocated with your templates during development. A
 ## Install
 
 ```
-go get github.com/samueldcorbin/go-template-static@v0.1.0
+go get github.com/samueldcorbin/go-template-static@v0.2.0
 ```
 
 ## Usage
