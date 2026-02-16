@@ -176,27 +176,14 @@ func injectInList(list *parse.ListNode, tags []string) bool {
 		case *parse.TextNode:
 			i := bytes.Index(n.Text, []byte("</head>"))
 			if i >= 0 {
-				// Detect indentation: find last newline before </head>.
-				nlPos := bytes.LastIndexByte(n.Text[:i], '\n')
 				var injection []byte
-				if nlPos >= 0 && isAllWhitespace(n.Text[nlPos+1:i]) {
-					// </head> is on its own line. Tags go one level deeper.
-					headIndent := string(n.Text[nlPos+1 : i])
-					tagIndent := headIndent + "  "
-					for _, tag := range tags {
-						injection = append(injection, (tagIndent + tag + "\n")...)
-					}
-					injection = append(injection, headIndent...)
-					// Splice from after the newline, replacing the existing indent.
-					n.Text = append(n.Text[:nlPos+1], append(injection, n.Text[i:]...)...)
-				} else {
-					// </head> shares a line with other content.
-					for _, tag := range tags {
-						injection = append(injection, ("\n  " + tag)...)
-					}
+				if i == 0 || n.Text[i-1] != '\n' {
 					injection = append(injection, '\n')
-					n.Text = append(n.Text[:i], append(injection, n.Text[i:]...)...)
 				}
+				for _, tag := range tags {
+					injection = append(injection, (tag + "\n")...)
+				}
+				n.Text = append(n.Text[:i], append(injection, n.Text[i:]...)...)
 				return true
 			}
 		case *parse.IfNode:
@@ -214,15 +201,6 @@ func injectInList(list *parse.ListNode, tags []string) bool {
 		}
 	}
 	return false
-}
-
-func isAllWhitespace(b []byte) bool {
-	for _, c := range b {
-		if c != ' ' && c != '\t' {
-			return false
-		}
-	}
-	return true
 }
 
 // writeIfChanged writes content to path only if the file doesn't exist or its
