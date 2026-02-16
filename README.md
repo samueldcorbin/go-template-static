@@ -24,14 +24,12 @@ h1 { color: navy; }
 console.log("ready");
 {{end}}
 
-{{define "page"}}
 <html>
 <head></head>
 <body>
   <h1>Hello</h1>
 </body>
 </html>
-{{end}}
 ```
 
 Then call `Parse` at startup:
@@ -59,7 +57,7 @@ func main() {
 
 	// Render using rt — <link>/<script> tags are injected automatically.
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		rt.ExecuteTemplate(w, "page", nil)
+		rt.ExecuteTemplate(w, "page.html", nil)
 	})
 
 	http.ListenAndServe(":8080", nil)
