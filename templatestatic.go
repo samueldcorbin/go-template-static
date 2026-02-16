@@ -181,7 +181,7 @@ func injectInList(list *parse.ListNode, tags []string) bool {
 					injection = append(injection, '\n')
 				}
 				for _, tag := range tags {
-					injection = append(injection, (tag + "\n")...)
+					injection = append(injection, ("  " + tag + "\n")...)
 				}
 				n.Text = append(n.Text[:i], append(injection, n.Text[i:]...)...)
 				return true
