@@ -68,7 +68,10 @@ This writes `./static/main.css` and `./static/app.js`, and renders the page as:
 
 ```html
 <html>
-<head><link rel="stylesheet" href="/static/main.css"><script src="/static/app.js"></script></head>
+<head>
+  <link rel="stylesheet" href="/static/main.css">
+  <script src="/static/app.js"></script>
+</head>
 <body>
   <h1>Hello</h1>
 </body>

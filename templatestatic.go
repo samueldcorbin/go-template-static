@@ -101,8 +101,8 @@ func Parse(t *template.Template, data any, outputDir, urlPrefix string) (*templa
 	}
 
 	// Inject auto tags before </head> (CSS first, then JS).
-	autoTags := strings.Join(append(autoCSS, autoJS...), "")
-	if autoTags != "" {
+	autoTags := append(autoCSS, autoJS...)
+	if len(autoTags) > 0 {
 		injectBeforeCloseHead(resultClone, autoTags)
 	}
 
@@ -155,8 +155,8 @@ func walkTree(n parse.Node, fn func(parse.Node)) {
 }
 
 // injectBeforeCloseHead finds the first </head> in any text node across
-// all templates and splices tags immediately before it.
-func injectBeforeCloseHead(t *template.Template, tags string) {
+// all templates and splices formatted tags before it.
+func injectBeforeCloseHead(t *template.Template, tags []string) {
 	for _, tmpl := range t.Templates() {
 		if tmpl.Tree == nil {
 			continue
@@ -167,7 +167,7 @@ func injectBeforeCloseHead(t *template.Template, tags string) {
 	}
 }
 
-func injectInList(list *parse.ListNode, tags string) bool {
+func injectInList(list *parse.ListNode, tags []string) bool {
 	if list == nil {
 		return false
 	}
@@ -176,7 +176,27 @@ func injectInList(list *parse.ListNode, tags string) bool {
 		case *parse.TextNode:
 			i := bytes.Index(n.Text, []byte("</head>"))
 			if i >= 0 {
-				n.Text = append(n.Text[:i], append([]byte(tags), n.Text[i:]...)...)
+				// Detect indentation: find last newline before </head>.
+				nlPos := bytes.LastIndexByte(n.Text[:i], '\n')
+				var injection []byte
+				if nlPos >= 0 && isAllWhitespace(n.Text[nlPos+1:i]) {
+					// </head> is on its own line. Tags go one level deeper.
+					headIndent := string(n.Text[nlPos+1 : i])
+					tagIndent := headIndent + "  "
+					for _, tag := range tags {
+						injection = append(injection, (tagIndent + tag + "\n")...)
+					}
+					injection = append(injection, headIndent...)
+					// Splice from after the newline, replacing the existing indent.
+					n.Text = append(n.Text[:nlPos+1], append(injection, n.Text[i:]...)...)
+				} else {
+					// </head> shares a line with other content.
+					for _, tag := range tags {
+						injection = append(injection, ("\n  " + tag)...)
+					}
+					injection = append(injection, '\n')
+					n.Text = append(n.Text[:i], append(injection, n.Text[i:]...)...)
+				}
 				return true
 			}
 		case *parse.IfNode:
@@ -194,6 +214,15 @@ func injectInList(list *parse.ListNode, tags string) bool {
 		}
 	}
 	return false
+}
+
+func isAllWhitespace(b []byte) bool {
+	for _, c := range b {
+		if c != ' ' && c != '\t' {
+			return false
+		}
+	}
+	return true
 }
 
 // writeIfChanged writes content to path only if the file doesn't exist or its
