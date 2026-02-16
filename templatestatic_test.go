@@ -8,18 +8,23 @@ import (
 	"testing"
 )
 
-const testTemplate = `{{define "page"}}
+// Auto-injection: no explicit {{template}} calls, tags injected before </head>.
+const testTemplateAuto = `{{define "static-css-main"}}body { color: red; }{{end}}
+{{define "static-js-app"}}console.log("hi");{{end}}
+{{define "greeting"}}Hello{{end}}
+{{define "page"}}
 <html>
-<head>{{block "static-css-main" .}}body { color: red; }{{end}}</head>
+<head>
+<title>Test</title>
+</head>
 <body>
-{{block "greeting" .}}Hello{{end}}
-{{block "static-js-app" .}}console.log("hi");{{end}}
+{{template "greeting" .}}
 </body>
 </html>
 {{end}}`
 
-func TestParse(t *testing.T) {
-	tmpl := template.Must(template.New("test").Parse(testTemplate))
+func TestParseAutoInject(t *testing.T) {
+	tmpl := template.Must(template.New("test").Parse(testTemplateAuto))
 	outDir := t.TempDir()
 
 	rt, err := Parse(tmpl, nil, outDir, "/static")
@@ -27,7 +32,7 @@ func TestParse(t *testing.T) {
 		t.Fatalf("Parse: %v", err)
 	}
 
-	// 1. Check static files were written with correct content.
+	// Check static files were written.
 	css, err := os.ReadFile(filepath.Join(outDir, "main.css"))
 	if err != nil {
 		t.Fatalf("reading main.css: %v", err)
@@ -44,7 +49,7 @@ func TestParse(t *testing.T) {
 		t.Errorf("app.js = %q, want %q", js, `console.log("hi");`)
 	}
 
-	// 2. Returned template renders <link>/<script> tags.
+	// Render and check tags were injected before </head>.
 	var buf bytes.Buffer
 	if err := rt.ExecuteTemplate(&buf, "page", nil); err != nil {
 		t.Fatalf("ExecuteTemplate: %v", err)
@@ -52,21 +57,35 @@ func TestParse(t *testing.T) {
 	out := buf.String()
 
 	wantCSS := `<link rel="stylesheet" href="/static/main.css">`
+	wantJS := `<script src="/static/app.js"></script>`
 	if !bytes.Contains([]byte(out), []byte(wantCSS)) {
 		t.Errorf("output missing CSS tag %q\ngot: %s", wantCSS, out)
 	}
-
-	wantJS := `<script src="/static/app.js"></script>`
 	if !bytes.Contains([]byte(out), []byte(wantJS)) {
 		t.Errorf("output missing JS tag %q\ngot: %s", wantJS, out)
 	}
 
-	// 3. Non-static blocks are unchanged.
-	if !bytes.Contains([]byte(out), []byte("Hello")) {
-		t.Errorf("output missing non-static block content 'Hello'\ngot: %s", out)
+	// Tags should appear before </head>.
+	headClose := bytes.Index([]byte(out), []byte("</head>"))
+	cssPos := bytes.Index([]byte(out), []byte(wantCSS))
+	jsPos := bytes.Index([]byte(out), []byte(wantJS))
+	if cssPos > headClose {
+		t.Errorf("CSS tag should appear before </head>")
+	}
+	if jsPos > headClose {
+		t.Errorf("JS tag should appear before </head>")
+	}
+	// CSS before JS.
+	if cssPos > jsPos {
+		t.Errorf("CSS tag should appear before JS tag")
 	}
 
-	// 4. Original template is not modified.
+	// Non-static definitions are unchanged.
+	if !bytes.Contains([]byte(out), []byte("Hello")) {
+		t.Errorf("output missing non-static content 'Hello'\ngot: %s", out)
+	}
+
+	// Original template is not modified.
 	var origBuf bytes.Buffer
 	if err := tmpl.ExecuteTemplate(&origBuf, "page", nil); err != nil {
 		t.Fatalf("original ExecuteTemplate: %v", err)
@@ -75,13 +94,66 @@ func TestParse(t *testing.T) {
 	if bytes.Contains([]byte(origOut), []byte("<link")) {
 		t.Errorf("original template was modified — contains <link> tag:\n%s", origOut)
 	}
-	if !bytes.Contains([]byte(origOut), []byte("body { color: red; }")) {
-		t.Errorf("original template lost CSS content:\n%s", origOut)
+}
+
+// Explicit placement: {{template "static-css-*"}} call controls where the tag goes.
+const testTemplateExplicit = `{{define "static-css-critical"}}h1 { font-size: 2em; }{{end}}
+{{define "static-js-app"}}console.log("hi");{{end}}
+{{define "page"}}
+<html>
+<head>
+{{template "static-css-critical"}}
+</head>
+<body></body>
+</html>
+{{end}}`
+
+func TestParseExplicitPlacement(t *testing.T) {
+	tmpl := template.Must(template.New("test").Parse(testTemplateExplicit))
+	outDir := t.TempDir()
+
+	rt, err := Parse(tmpl, nil, outDir, "/static")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := rt.ExecuteTemplate(&buf, "page", nil); err != nil {
+		t.Fatalf("ExecuteTemplate: %v", err)
+	}
+	out := buf.String()
+
+	wantCSS := `<link rel="stylesheet" href="/static/critical.css">`
+	wantJS := `<script src="/static/app.js"></script>`
+
+	// Explicit CSS tag should appear exactly once (not also auto-injected).
+	if c := bytes.Count([]byte(out), []byte(wantCSS)); c != 1 {
+		t.Errorf("CSS tag should appear exactly once, got %d\noutput: %s", c, out)
+	}
+
+	// CSS tag should come before the auto-injected JS tag (explicit call is first).
+	cssPos := bytes.Index([]byte(out), []byte(wantCSS))
+	jsPos := bytes.Index([]byte(out), []byte(wantJS))
+	if cssPos < 0 {
+		t.Fatalf("output missing CSS tag %q\ngot: %s", wantCSS, out)
+	}
+	if jsPos < 0 {
+		t.Fatalf("output missing JS tag %q\ngot: %s", wantJS, out)
+	}
+	if cssPos > jsPos {
+		t.Errorf("explicit CSS tag should appear before auto-injected JS tag\noutput: %s", out)
+	}
+
+	// JS had no explicit call — should be auto-injected before </head>.
+	headClose := bytes.Index([]byte(out), []byte("</head>"))
+	if jsPos > headClose {
+		t.Errorf("auto-injected JS tag should appear before </head>")
 	}
 }
 
 func TestParseWithData(t *testing.T) {
-	const tmplStr = `{{define "page"}}{{block "static-css-theme" .}}/* {{.Theme}} */{{end}}{{end}}`
+	const tmplStr = `{{define "static-css-theme"}}/* {{.Theme}} */{{end}}
+{{define "page"}}<html><head></head></html>{{end}}`
 	tmpl := template.Must(template.New("test").Parse(tmplStr))
 	outDir := t.TempDir()
 
